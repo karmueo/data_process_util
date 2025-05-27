@@ -146,11 +146,11 @@ if __name__ == '__main__':
     #    对于此示例，我们使用上面创建的模拟数据路径。
     #    在实际使用中，请将此路径替换为你的数据集的实际根目录。
     #    例如: my_dataset_root_dir = "/path/to/your/frames_dataset"
-    my_dataset_root_directory = "/home/tl/data/datasets/mmaction2/110_video_frames/val"
+    my_dataset_root_directory = "/home/tl/data/datasets/mmaction2/110_video_frames/test"
 
     # 2. 定义你希望生成的注释文件的名称。
     #    此文件将创建在 'my_dataset_root_directory' 内部。
-    annotation_file_name = "110_video_val_annotation_file.txt"
+    annotation_file_name = "110_video_train_annotation_file.txt"
 
     # 3. 生成注释文件
     generate_rawframes_annotation(my_dataset_root_directory, annotation_file_name)
