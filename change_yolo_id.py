@@ -52,7 +52,7 @@ def process_label_file(file_path, old_id, new_id):
 def main():
     parser = argparse.ArgumentParser(description="YOLO标注类别ID批量修改工具")
     parser.add_argument(
-        "--label_dir", default="325/drone/labels", help="标注文件夹路径")
+        "--label_dir", default="/home/tl/data/datasets/截图", help="标注文件夹路径")
     parser.add_argument("--old_id", type=int, default=0, help="原类别ID (整数)")
     parser.add_argument("--new_id", type=int, default=1, help="新类别ID (整数)")
     args = parser.parse_args()
