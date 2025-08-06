@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 
-def split_yolo_dataset(source_dir, target_dir, ratio=None, num_samples=None, seed=42):
+def split_yolo_dataset(source_dir, target_dir, ratio=None, num_samples=None, seed=12):
     """
     从YOLO格式数据集中随机抽取图片和标注到新文件夹
 
@@ -62,15 +62,15 @@ def split_yolo_dataset(source_dir, target_dir, ratio=None, num_samples=None, see
 # 使用示例
 if __name__ == "__main__":
     # 按比例抽取（20%）
-    # split_yolo_dataset(
-    #     source_dir='yolo',
-    #     target_dir='yolo_sample_20percent',
-    #     ratio=0.2
-    # )
+    split_yolo_dataset(
+        source_dir='/home/tl/data/datasets/yolo/110/RGB/bird_7.19',
+        target_dir='/home/tl/data/datasets/yolo/110/RGB/bird_7.19_sp',
+        ratio=0.2
+    )
 
     # 或按绝对数量抽取（100对）
-    split_yolo_dataset(
-        source_dir='yolo',
-        target_dir='yolo_sample_100',
-        num_samples=100
-    )
+    # split_yolo_dataset(
+    #     source_dir='/home/tl/data/datasets/yolo/110/RGB/bird_7.19',
+    #     target_dir='/home/tl/data/datasets/yolo/110/RGB/bird_7.19_sp',
+    #     num_samples=100
+    # )
