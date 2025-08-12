@@ -22,7 +22,12 @@ def resize_with_padding(img, target_width, target_height):
     return padded
 
 
-def main(folder, output, fps, width, height, chunk_size):
+def resize_stretch(img, target_width, target_height):
+    """不保持比例，直接拉伸到指定尺寸"""
+    return cv2.resize(img, (target_width, target_height))
+
+
+def main(folder, output, fps, width, height, chunk_size, resize_mode):
     # 获取所有帧图片，按帧号排序
     image_files = glob.glob(os.path.join(folder, "*.jpg"))
     image_files.sort(key=lambda x: int(
@@ -62,7 +67,10 @@ def main(folder, output, fps, width, height, chunk_size):
             if img is None:
                 print(f"跳过无法读取的图片: {img_path}")
                 continue
-            frame = resize_with_padding(img, width, height)
+            if resize_mode == 'stretch':
+                frame = resize_stretch(img, width, height)
+            else:
+                frame = resize_with_padding(img, width, height)
             video_writer.write(frame)
 
         video_writer.release()
@@ -77,6 +85,12 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=224, help="目标视频宽度")
     parser.add_argument("--height", type=int, default=224, help="目标视频高度")
     parser.add_argument("--chunk", type=int, default=90, help="每段视频包含的图片数量")
+    parser.add_argument(
+        "--resize_mode",
+        choices=['pad', 'stretch'],
+        default='pad',
+        help="resize 方式: pad=保持比例加黑边, stretch=直接拉伸 (默认 pad)"
+    )
     args = parser.parse_args()
     main(args.folder, args.output, args.fps,
-         args.width, args.height, args.chunk)
+         args.width, args.height, args.chunk, args.resize_mode)
