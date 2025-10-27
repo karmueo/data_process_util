@@ -215,8 +215,8 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         "-o",
-        default="coco_annotations.json",
-        help="Output COCO JSON path",
+        default=None,
+        help="Output COCO JSON path (defaults to root/coco.json)",
     )
     parser.add_argument(
         "--classes",
@@ -235,9 +235,13 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> None:
     args = _parse_args(argv)
     root = Path(args.root)
+    
+    # 如果未指定输出路径，使用 root/coco.json
+    output_path = Path(args.output) if args.output else root / "coco.json"
+    
     classes_arg = Path(args.classes) if args.classes else None
     yolo_to_coco(
-        root, Path(args.output), recursive=args.recursive, classes_file=classes_arg
+        root, output_path, recursive=args.recursive, classes_file=classes_arg
     )
 
 

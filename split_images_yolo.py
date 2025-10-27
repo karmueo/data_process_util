@@ -23,6 +23,7 @@ class YOLOImageSplitter:
         output_dir: Optional[str] = None,
         overwrite: bool = False,
         keep_original: bool = True,
+        generate_center: bool = False,
     ):
         """
         初始化切分器
@@ -33,12 +34,14 @@ class YOLOImageSplitter:
             output_dir: 输出目录，如果为None则覆盖原目录
             overwrite: 是否覆盖原目录（当output_dir为None时生效）
             keep_original: 是否保留原始图片和标注
+            generate_center: 是否生成中心子图
         """
         self.root_dir = Path(root_dir)
         self.overlap_ratio = overlap_ratio
         self.output_dir = Path(output_dir) if output_dir else None
         self.overwrite = overwrite
         self.keep_original = keep_original
+        self.generate_center = generate_center
 
         self.images_dir = self.root_dir / "images"
         self.labels_dir = self.root_dir / "labels"
@@ -126,6 +129,26 @@ class YOLOImageSplitter:
             ("bottom_left", 0, top_split, right_split, img_height),
             ("bottom_right", left_split, top_split, img_width, img_height),
         ]
+
+        # 如果生成中心子图，添加中心区域
+        if self.generate_center:
+            # 子图的尺寸等于四个角的子图尺寸
+            sub_width = right_split  # 左上、左下子图的宽度
+            sub_height = bottom_split  # 左上、右上子图的高度
+            
+            # 计算中心子图的坐标（中心点在原图中心）
+            center_x1 = mid_x - sub_width // 2
+            center_y1 = mid_y - sub_height // 2
+            center_x2 = center_x1 + sub_width
+            center_y2 = center_y1 + sub_height
+            
+            # 确保不超出原图边界
+            center_x1 = max(0, center_x1)
+            center_y1 = max(0, center_y1)
+            center_x2 = min(img_width, center_x2)
+            center_y2 = min(img_height, center_y2)
+            
+            regions.append(("center", center_x1, center_y1, center_x2, center_y2))
 
         return regions
 
@@ -295,6 +318,7 @@ class YOLOImageSplitter:
         print(f"根目录: {self.root_dir}")
         print(f"重叠比例: {self.overlap_ratio * 100:.1f}%")
         print(f"保留原图: {'是' if self.keep_original else '否'}")
+        print(f"生成中心子图: {'是' if self.generate_center else '否'}")
 
         # 设置输出目录
         out_images_dir, out_labels_dir = self.setup_output_dirs()
@@ -385,6 +409,9 @@ def main():
 
   # 切分到新目录，重叠20%（默认保留原图）
   python split_images_yolo.py -i ./yolo_dataset -o ./yolo_split --overlap 0.2
+
+  生成四个角的子图 + 中心子图
+  python split_images_yolo.py -i ./yolo_dataset -o ./yolo_split --overlap 0.1 --generate-center
         """,
     )
 
@@ -423,6 +450,12 @@ def main():
         help="如果输出目录已存在，则覆盖",
     )
 
+    parser.add_argument(
+        "--generate-center",
+        action="store_true",
+        help="是否生成中心子图（中心点在原图中心，尺寸与四个角的子图相同）",
+    )
+
     args = parser.parse_args()
 
     # 创建切分器
@@ -432,6 +465,7 @@ def main():
         output_dir=args.output,
         overwrite=args.overwrite,
         keep_original=not args.no_keep_original,
+        generate_center=args.generate_center,
     )
 
     # 执行切分
