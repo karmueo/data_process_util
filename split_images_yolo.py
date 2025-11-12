@@ -24,6 +24,7 @@ class YOLOImageSplitter:
         overwrite: bool = False,
         keep_original: bool = True,
         generate_center: bool = False,
+        require_full_bbox: bool = False,
     ):
         """
         初始化切分器
@@ -35,6 +36,7 @@ class YOLOImageSplitter:
             overwrite: 是否覆盖原目录（当output_dir为None时生效）
             keep_original: 是否保留原始图片和标注
             generate_center: 是否生成中心子图
+            require_full_bbox: 是否要求检测框完全在子图内才保存子图
         """
         self.root_dir = Path(root_dir)
         self.overlap_ratio = overlap_ratio
@@ -42,6 +44,7 @@ class YOLOImageSplitter:
         self.overwrite = overwrite
         self.keep_original = keep_original
         self.generate_center = generate_center
+        self.require_full_bbox = require_full_bbox
 
         self.images_dir = self.root_dir / "images"
         self.labels_dir = self.root_dir / "labels"
@@ -161,7 +164,7 @@ class YOLOImageSplitter:
         region_y1: int,
         region_x2: int,
         region_y2: int,
-    ) -> Tuple[bool, Optional[List[float]]]:
+    ) -> Tuple[bool, Optional[List[float]], bool]:
         """
         将YOLO格式的bbox转换到切分后的子图坐标系
 
@@ -171,7 +174,7 @@ class YOLOImageSplitter:
             region_x1, region_y1, region_x2, region_y2: 子图在原图中的区域
 
         Returns:
-            (is_valid, new_bbox): 是否有效，新的YOLO格式bbox
+            (is_valid, new_bbox, is_full): 是否有效，新的YOLO格式bbox，是否完整
         """
         # 转换为像素坐标
         x_center = bbox[0] * img_width
@@ -193,7 +196,7 @@ class YOLOImageSplitter:
 
         # 检查是否有交集
         if clipped_x1 >= clipped_x2 or clipped_y1 >= clipped_y2:
-            return False, None
+            return False, None, False
 
         # 计算裁剪后的面积占原bbox的比例
         original_area = box_width * box_height
@@ -202,7 +205,7 @@ class YOLOImageSplitter:
 
         # 如果裁剪后面积太小（小于原面积的10%），则丢弃
         if area_ratio < 0.1:
-            return False, None
+            return False, None, False
 
         # 转换到子图坐标系
         new_x1 = clipped_x1 - region_x1
@@ -226,7 +229,7 @@ class YOLOImageSplitter:
         new_width = max(0, min(1, new_width))
         new_height = max(0, min(1, new_height))
 
-        return True, [new_x_center, new_y_center, new_width, new_height]
+        return True, [new_x_center, new_y_center, new_width, new_height], area_ratio >= 1.0
 
     def split_image_and_labels(
         self,
@@ -283,17 +286,24 @@ class YOLOImageSplitter:
             new_image_path = out_images_dir / new_image_name
             new_label_path = out_labels_dir / new_label_name
 
-            # 保存图片
-            cv2.imwrite(str(new_image_path), cropped_img)
-
             # 处理标注
             new_annotations = []
+            has_full_bbox = False
             for class_id, bbox in annotations:
-                is_valid, new_bbox = self.convert_bbox_to_region(
+                is_valid, new_bbox, is_full = self.convert_bbox_to_region(
                     bbox, img_width, img_height, x1, y1, x2, y2
                 )
                 if is_valid:
                     new_annotations.append((class_id, new_bbox))
+                    if is_full:
+                        has_full_bbox = True
+
+            # 如果需要完整bbox但没有，则跳过保存
+            if self.require_full_bbox and not has_full_bbox:
+                continue
+
+            # 保存图片
+            cv2.imwrite(str(new_image_path), cropped_img)
 
             # 保存标注
             with open(new_label_path, "w", encoding="utf-8") as f:
@@ -319,6 +329,7 @@ class YOLOImageSplitter:
         print(f"重叠比例: {self.overlap_ratio * 100:.1f}%")
         print(f"保留原图: {'是' if self.keep_original else '否'}")
         print(f"生成中心子图: {'是' if self.generate_center else '否'}")
+        print(f"要求完整检测框: {'是' if self.require_full_bbox else '否'}")
 
         # 设置输出目录
         out_images_dir, out_labels_dir = self.setup_output_dirs()
@@ -412,6 +423,9 @@ def main():
 
   生成四个角的子图 + 中心子图
   python split_images_yolo.py -i ./yolo_dataset -o ./yolo_split --overlap 0.1 --generate-center
+
+  只保存包含完整检测框的子图
+  python split_images_yolo.py -i ./yolo_dataset -o ./yolo_split --require-full-bbox
         """,
     )
 
@@ -456,6 +470,12 @@ def main():
         help="是否生成中心子图（中心点在原图中心，尺寸与四个角的子图相同）",
     )
 
+    parser.add_argument(
+        "--require-full-bbox",
+        action="store_true",
+        help="只保存包含完整检测框的子图（检测框完全在子图内）",
+    )
+
     args = parser.parse_args()
 
     # 创建切分器
@@ -466,6 +486,7 @@ def main():
         overwrite=args.overwrite,
         keep_original=not args.no_keep_original,
         generate_center=args.generate_center,
+        require_full_bbox=args.require_full_bbox,
     )
 
     # 执行切分
