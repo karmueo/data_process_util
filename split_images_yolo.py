@@ -1,6 +1,7 @@
 """
 将YOLO数据集的图片和标注切分成四个子图（左上、左下、右上、右下）
 支持重叠区域、保留原图、输出到新目录或覆盖原目录
+并可以将生成的子图和对应的标注导出到指定文件夹（在该文件夹下创建 `images/` 和 `labels/` 子目录，通过 --export 选项）
 """
 
 import argparse
@@ -25,6 +26,7 @@ class YOLOImageSplitter:
         keep_original: bool = True,
         generate_center: bool = False,
         require_full_bbox: bool = False,
+        export_dir: Optional[str] = None,
     ):
         """
         初始化切分器
@@ -37,6 +39,7 @@ class YOLOImageSplitter:
             keep_original: 是否保留原始图片和标注
             generate_center: 是否生成中心子图
             require_full_bbox: 是否要求检测框完全在子图内才保存子图
+            export_dir: 如果指定则把新生成的子图和标注拷贝到该目录（会在目录下创建 images/ 和 labels/ 子目录）
         """
         self.root_dir = Path(root_dir)
         self.overlap_ratio = overlap_ratio
@@ -45,6 +48,9 @@ class YOLOImageSplitter:
         self.keep_original = keep_original
         self.generate_center = generate_center
         self.require_full_bbox = require_full_bbox
+        # 将生成的新子图（包括图片和对应的标注）拷贝到 export_dir
+        # export_dir 为 None 表示不执行额外拷贝
+        self.export_dir = Path(export_dir) if export_dir else None
 
         self.images_dir = self.root_dir / "images"
         self.labels_dir = self.root_dir / "labels"
@@ -77,6 +83,10 @@ class YOLOImageSplitter:
             print(f"错误：输出目录已存在: {self.output_dir}")
             print("使用 --overwrite 参数覆盖，或指定新的输出目录")
             return False
+        if self.export_dir and self.export_dir.exists() and not self.overwrite:
+            print(f"错误：导出目录已存在: {self.export_dir}")
+            print("使用 --overwrite 参数覆盖，或指定新的导出目录")
+            return False
 
         return True
 
@@ -99,6 +109,26 @@ class YOLOImageSplitter:
             out_labels_dir = self.labels_dir
 
         return out_images_dir, out_labels_dir
+
+    def setup_export_dir(self) -> Optional[Tuple[Path, Path]]:
+        """如果提供了 export_dir，则创建导出目录并创建 images/ 和 labels/ 子目录，
+        并返回 (export_images_dir, export_labels_dir)，否则返回 None
+        """
+        if not self.export_dir:
+            return None
+
+        if self.overwrite and self.export_dir.exists():
+            print(f"删除已存在的导出目录: {self.export_dir}")
+            shutil.rmtree(self.export_dir)
+
+        # 创建目录并子目录
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+        self.export_images_dir = self.export_dir / "images"
+        self.export_labels_dir = self.export_dir / "labels"
+        self.export_images_dir.mkdir(parents=True, exist_ok=True)
+        self.export_labels_dir.mkdir(parents=True, exist_ok=True)
+
+        return self.export_images_dir, self.export_labels_dir
 
     def calculate_split_regions(
         self, img_width: int, img_height: int
@@ -314,6 +344,17 @@ class YOLOImageSplitter:
             split_count += 1
             self.total_new_annotations += len(new_annotations)
 
+            # 如果指定了导出目录，将生成的子图和label分别拷贝到 export/images 和 export/labels 子目录
+            if self.export_dir and hasattr(self, 'export_images_dir') and hasattr(self, 'export_labels_dir'):
+                try:
+                    # 拷贝图片
+                    shutil.copy2(new_image_path, self.export_images_dir / new_image_path.name)
+                    # 拷贝标注
+                    if new_label_path.exists():
+                        shutil.copy2(new_label_path, self.export_labels_dir / new_label_path.name)
+                except Exception as e:
+                    print(f"  警告：导出文件到 {self.export_dir} 失败: {e}")
+
         self.total_new_images += split_count
         return split_count
 
@@ -333,22 +374,36 @@ class YOLOImageSplitter:
 
         # 设置输出目录
         out_images_dir, out_labels_dir = self.setup_output_dirs()
+        # 如果指定了导出目录，创建导出目录并子目录 images/ labels/
+        export_dirs = None
+        if self.export_dir:
+            export_dirs = self.setup_export_dir()
 
         if self.output_dir:
             print(f"输出目录: {self.output_dir}")
         else:
             print(f"输出目录: {self.root_dir} (覆盖模式)")
 
-        # 如果保留原图且输出到新目录，先复制原图
-        if self.keep_original and self.output_dir:
+        # 如果保留原图，复制原图到输出目录和/或导出目录
+        if self.keep_original:
             print("\n复制原始图片和标注...")
-            for img_file in self.images_dir.iterdir():
-                if img_file.suffix.lower() in self.SUPPORTED_IMAGE_EXTS:
-                    shutil.copy2(img_file, out_images_dir / img_file.name)
+            if self.output_dir:
+                for img_file in self.images_dir.iterdir():
+                    if img_file.suffix.lower() in self.SUPPORTED_IMAGE_EXTS:
+                        shutil.copy2(img_file, out_images_dir / img_file.name)
 
-            for label_file in self.labels_dir.iterdir():
-                if label_file.suffix.lower() == ".txt":
-                    shutil.copy2(label_file, out_labels_dir / label_file.name)
+                for label_file in self.labels_dir.iterdir():
+                    if label_file.suffix.lower() == ".txt":
+                        shutil.copy2(label_file, out_labels_dir / label_file.name)
+
+            if self.export_dir and export_dirs:
+                export_images_dir, export_labels_dir = export_dirs
+                for img_file in self.images_dir.iterdir():
+                    if img_file.suffix.lower() in self.SUPPORTED_IMAGE_EXTS:
+                        shutil.copy2(img_file, export_images_dir / img_file.name)
+                for label_file in self.labels_dir.iterdir():
+                    if label_file.suffix.lower() == ".txt":
+                        shutil.copy2(label_file, export_labels_dir / label_file.name)
 
         # 收集所有图片
         image_files = sorted(
@@ -403,6 +458,13 @@ class YOLOImageSplitter:
             print(f"输出目录: {self.output_dir}")
         else:
             print(f"输出目录: {self.root_dir}")
+
+        if self.export_dir:
+            if hasattr(self, 'export_images_dir') and hasattr(self, 'export_labels_dir'):
+                print(f"导出目录 (images)：{self.export_images_dir}")
+                print(f"导出目录 (labels)：{self.export_labels_dir}")
+            else:
+                print(f"导出目录: {self.export_dir}")
         print("=" * 70)
 
 
@@ -426,6 +488,8 @@ def main():
 
   只保存包含完整检测框的子图
   python split_images_yolo.py -i ./yolo_dataset -o ./yolo_split --require-full-bbox
+    # 生成子图并将生成的子图和对应标注导出到指定目录（将在目录下创建 images/ 和 labels/）
+    python split_images_yolo.py -i ./yolo_dataset --export ./yolo_export_dir
         """,
     )
 
@@ -443,6 +507,13 @@ def main():
         type=str,
         default=None,
         help="输出目录（如果不指定则覆盖原目录）",
+    )
+
+    parser.add_argument(
+        "--export",
+        type=str,
+        default=None,
+        help="将生成的子图和对应的标注导出到指定目录，默认会在该目录下创建 images/ 和 labels/ 子目录",
     )
 
     parser.add_argument(
@@ -487,6 +558,7 @@ def main():
         keep_original=not args.no_keep_original,
         generate_center=args.generate_center,
         require_full_bbox=args.require_full_bbox,
+        export_dir=args.export,
     )
 
     # 执行切分

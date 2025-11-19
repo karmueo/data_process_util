@@ -1,6 +1,7 @@
 """
 清理经过split_images_yolo.py处理的YOLO数据集
 去掉所有的原始图片和标注，只留下切分后的四个子图及其标注
+或者删除切分后的子图，只留下原始图片和标注
 支持预览模式和删除模式
 """
 
@@ -14,9 +15,19 @@ class SplitYOLOCleaner:
     """split_images_yolo.py处理结果的清理器"""
 
     SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-    SPLIT_SUFFIXES = {"_top_left", "_top_right", "_bottom_left", "_bottom_right", "_tl", "_tr", "_bl", "_br"}
+    SPLIT_SUFFIXES = {
+        "_top_left",
+        "_top_right",
+        "_bottom_left",
+        "_bottom_right",
+        "_tl",
+        "_tr",
+        "_bl",
+        "_br",
+        "_center",
+    }
 
-    def __init__(self, root_dir: str, dry_run: bool = True, backup_dir: Optional[str] = None):
+    def __init__(self, root_dir: str, dry_run: bool = True, backup_dir: Optional[str] = None, keep_original: bool = False):
         """
         初始化清理器
 
@@ -24,16 +35,17 @@ class SplitYOLOCleaner:
             root_dir: YOLO数据集根目录（包含images和labels文件夹）
             dry_run: 如果为True，只显示要删除的文件不实际删除
             backup_dir: 备份目录，如果指定则移动文件到此目录，而不是删除
+            keep_original: 如果为True，删除切分后的子图，只保留原始图片和标注
         """
         self.root_dir = Path(root_dir)
         self.dry_run = dry_run
         self.backup_dir = Path(backup_dir) if backup_dir else None
+        self.keep_original = keep_original
         self.images_dir = self.root_dir / "images"
         self.labels_dir = self.root_dir / "labels"
 
         # 统计信息
-        self.original_images_to_delete = []
-        self.original_labels_to_delete = []
+        self.files_to_delete = []
 
     def validate_inputs(self) -> bool:
         """验证输入参数"""
@@ -73,9 +85,41 @@ class SplitYOLOCleaner:
 
         return split_images
 
+    def find_files_to_delete(self, split_images: Set[str]) -> List[Path]:
+        """
+        根据模式识别要删除的文件
+
+        Args:
+            split_images: 切分后的子图名称集合
+
+        Returns:
+            要删除的文件列表
+        """
+        files_to_delete = []
+
+        if self.keep_original:
+            # 删除切分后的子图及其标注
+            for split_image in split_images:
+                image_path = self.images_dir / split_image
+                if image_path.exists():
+                    files_to_delete.append(image_path)
+
+                # 对应的标注文件
+                stem = Path(split_image).stem
+                label_path = self.labels_dir / f"{stem}.txt"
+                if label_path.exists():
+                    files_to_delete.append(label_path)
+        else:
+            # 删除原始图片和标注（原有逻辑）
+            original_images, original_labels = self.find_original_files(split_images)
+            files_to_delete.extend(original_images)
+            files_to_delete.extend(original_labels)
+
+        return files_to_delete
+
     def find_original_files(self, split_images: Set[str]) -> Tuple[List[Path], List[Path]]:
         """
-        识别要删除的原始图片和标注
+        识别要删除的原始图片和标注（原有逻辑）
 
         Args:
             split_images: 切分后的子图名称集合
@@ -123,10 +167,14 @@ class SplitYOLOCleaner:
     def preview(self):
         """预览要删除或移动的文件"""
         print("=" * 70)
-        if self.backup_dir:
-            print(f"预览要移动的文件到 {self.backup_dir}")
+        if self.keep_original:
+            action_desc = "预览要删除的切分后子图"
         else:
-            print("预览要删除的文件")
+            action_desc = "预览要删除的原始图片和标注"
+        if self.backup_dir:
+            print(f"{action_desc}（将移动到 {self.backup_dir}）")
+        else:
+            print(f"{action_desc}（将删除）")
         print("=" * 70)
 
         # 识别切分后的子图
@@ -139,55 +187,50 @@ class SplitYOLOCleaner:
 
         print(f"找到 {len(split_images)} 个切分后的子图")
 
-        # 找出要删除的原始文件
-        original_images, original_labels = self.find_original_files(split_images)
+        # 找出要删除的文件
+        self.files_to_delete = self.find_files_to_delete(split_images)
 
-        if not original_images and not original_labels:
-            print("\n未找到要删除的原始图片和标注")
-            print("所有文件可能已经被清理过了")
+        if not self.files_to_delete:
+            if self.keep_original:
+                print("\n未找到要删除的切分后子图")
+                print("所有切分后子图可能已经被清理过了")
+            else:
+                print("\n未找到要删除的原始图片和标注")
+                print("所有文件可能已经被清理过了")
             return
 
         print("\n" + "=" * 70)
-        print(f"要处理的原始图片 ({len(original_images)} 个):")
+        print(f"要处理的文件 ({len(self.files_to_delete)} 个):")
         print("=" * 70)
-        for img_path in sorted(original_images):
-            size_kb = img_path.stat().st_size / 1024
-            print(f"  {img_path.name:<50} ({size_kb:>8.2f} KB)")
+        for file_path in sorted(self.files_to_delete):
+            size_kb = file_path.stat().st_size / 1024
+            print(f"  {file_path.name:<50} ({size_kb:>8.2f} KB)")
 
-        print("\n" + "=" * 70)
-        print(f"要处理的原始标注 ({len(original_labels)} 个):")
-        print("=" * 70)
-        for label_path in sorted(original_labels):
-            size_kb = label_path.stat().st_size / 1024
-            print(f"  {label_path.name:<50} ({size_kb:>8.2f} KB)")
-
-        total_size = (
-            sum(p.stat().st_size for p in original_images)
-            + sum(p.stat().st_size for p in original_labels)
-        ) / (1024 * 1024)
+        total_size = sum(p.stat().st_size for p in self.files_to_delete) / (1024 * 1024)
 
         print("\n" + "=" * 70)
         action = "移动" if self.backup_dir else "删除"
-        print(f"总计将{action}: {len(original_images) + len(original_labels)} 个文件")
+        print(f"总计将{action}: {len(self.files_to_delete)} 个文件")
         print(f"总大小: {total_size:.2f} MB")
         print("=" * 70)
 
-        self.original_images_to_delete = original_images
-        self.original_labels_to_delete = original_labels
-
     def cleanup(self):
-        """删除或移动原始图片和标注"""
+        """删除或移动文件"""
         print("=" * 70)
-        if self.backup_dir:
-            print("清理YOLO数据集 - 移动模式")
+        if self.keep_original:
+            mode_desc = "保留原始图片和标注"
         else:
-            print("清理YOLO数据集 - 删除模式")
+            mode_desc = "保留切分后子图"
+        if self.backup_dir:
+            print(f"清理YOLO数据集 - {mode_desc} - 移动模式")
+        else:
+            print(f"清理YOLO数据集 - {mode_desc} - 删除模式")
         print("=" * 70)
 
         # 先预览
         self.preview()
 
-        if not self.original_images_to_delete and not self.original_labels_to_delete:
+        if not self.files_to_delete:
             print("\n没有文件需要处理")
             return
 
@@ -205,55 +248,40 @@ class SplitYOLOCleaner:
             backup_labels_dir.mkdir(parents=True, exist_ok=True)
             print(f"✓ 备份目录已创建: {self.backup_dir}")
 
-            print("\n移动原始图片...")
-            for img_path in self.original_images_to_delete:
+            print("\n移动文件...")
+            for file_path in self.files_to_delete:
                 try:
-                    dest_path = backup_images_dir / img_path.name
-                    shutil.move(str(img_path), str(dest_path))
-                    print(f"✓ 移动: {img_path.name}")
+                    # 根据文件类型决定目标目录
+                    if file_path.suffix.lower() in self.SUPPORTED_IMAGE_EXTS:
+                        dest_path = backup_images_dir / file_path.name
+                    else:
+                        dest_path = backup_labels_dir / file_path.name
+                    shutil.move(str(file_path), str(dest_path))
+                    print(f"✓ 移动: {file_path.name}")
                 except Exception as e:
-                    print(f"✗ 移动失败: {img_path.name} - {str(e)}")
-
-            print("\n移动原始标注...")
-            for label_path in self.original_labels_to_delete:
-                try:
-                    dest_path = backup_labels_dir / label_path.name
-                    shutil.move(str(label_path), str(dest_path))
-                    print(f"✓ 移动: {label_path.name}")
-                except Exception as e:
-                    print(f"✗ 移动失败: {label_path.name} - {str(e)}")
+                    print(f"✗ 移动失败: {file_path.name} - {str(e)}")
 
             print("\n" + "=" * 70)
             print("移动完成！")
             print("=" * 70)
-            print(f"已移动图片: {len(self.original_images_to_delete)} 个")
-            print(f"已移动标注: {len(self.original_labels_to_delete)} 个")
+            print(f"已移动文件: {len(self.files_to_delete)} 个")
             print(f"备份位置: {self.backup_dir}")
             print("=" * 70)
         else:
             print("\n确认删除...")
 
-            # 删除原始图片
-            for img_path in self.original_images_to_delete:
+            # 删除文件
+            for file_path in self.files_to_delete:
                 try:
-                    img_path.unlink()
-                    print(f"✓ 删除: {img_path.name}")
+                    file_path.unlink()
+                    print(f"✓ 删除: {file_path.name}")
                 except Exception as e:
-                    print(f"✗ 删除失败: {img_path.name} - {str(e)}")
-
-            # 删除原始标注
-            for label_path in self.original_labels_to_delete:
-                try:
-                    label_path.unlink()
-                    print(f"✓ 删除: {label_path.name}")
-                except Exception as e:
-                    print(f"✗ 删除失败: {label_path.name} - {str(e)}")
+                    print(f"✗ 删除失败: {file_path.name} - {str(e)}")
 
             print("\n" + "=" * 70)
             print("清理完成！")
             print("=" * 70)
-            print(f"已删除图片: {len(self.original_images_to_delete)} 个")
-            print(f"已删除标注: {len(self.original_labels_to_delete)} 个")
+            print(f"已删除文件: {len(self.files_to_delete)} 个")
             print("=" * 70)
 
 
@@ -277,6 +305,12 @@ def main():
 
   # 实际移动原始图片和标注到备份文件夹
   python cleanup_split_yolo.py -i ./yolo_split -b ./backup --move
+
+  # 删除切分后的子图，只保留原始图片和标注（预览）
+  python cleanup_split_yolo.py -i ./yolo_split --keep-original
+
+  # 实际删除切分后的子图，只保留原始图片和标注
+  python cleanup_split_yolo.py -i ./yolo_split --keep-original --delete
         """,
     )
 
@@ -309,9 +343,9 @@ def main():
     )
 
     parser.add_argument(
-        "--dry-run",
+        "--keep-original",
         action="store_true",
-        help="演练模式，只显示要处理的文件不实际操作（默认行为）",
+        help="删除切分后的子图，只保留原始图片和标注（默认删除原始图片，保留子图）",
     )
 
     args = parser.parse_args()
@@ -323,7 +357,7 @@ def main():
 
     # 创建清理器
     dry_run = not (args.delete or args.move)  # 如果指定了--delete或--move，则dry_run为False
-    cleaner = SplitYOLOCleaner(root_dir=args.input, dry_run=dry_run, backup_dir=args.backup)
+    cleaner = SplitYOLOCleaner(root_dir=args.input, dry_run=dry_run, backup_dir=args.backup, keep_original=args.keep_original)
 
     # 验证输入
     if not cleaner.validate_inputs():

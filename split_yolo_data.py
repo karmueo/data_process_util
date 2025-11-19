@@ -1,3 +1,25 @@
+"""
+Split YOLO dataset into train/val splits.
+
+Usage:
+    - Default behavior (if --output_dir not specified): the script creates a `train_val` folder under `--root_dir`
+        and writes `train/` and `val/` subfolders with `images/` and `labels/`.
+
+    - Options:
+        --root_dir        根目录，必须包含 `images/` 和 `labels/` 子目录 (默认: yolo/all/)
+        --train_ratio     训练集比例 (0-1) (默认: 0.9)
+        --output_dir      输出路径 (默认: <root_dir>/<out_subdir>)
+        --out_subdir      当未指定 --output_dir 时使用的子目录名 (默认: train_val)
+        --clean           若目标输出目录存在，清空 `train/` 和 `val/` 子目录后再复制
+        --force           在 --clean 模式下跳过交互确认并强制清理
+        --seed            随机种子
+
+Examples:
+    python split_yolo_data.py --root_dir /data/yolo_dataset
+    python split_yolo_data.py --root_dir /data/yolo_dataset --output_dir /work/my_split --train_ratio 0.8
+    python split_yolo_data.py --root_dir /data/yolo_dataset --clean --force
+"""
+
 import os
 import shutil
 import random
@@ -92,13 +114,27 @@ def main():
                         default=0.9,
                         help='训练集比例 (0-1)')
     parser.add_argument('--output_dir',
-                        default='yolo/train_val/',
-                        help='输出目录路径')
+                        default=None,
+                        help='输出目录路径 (若未指定, 默认使用 <root_dir>/<out_subdir>)')
+    parser.add_argument('--out_subdir',
+                        default='train_val',
+                        help='当未指定 --output_dir 时, 在 --root_dir 下创建的子目录名称 (默认 train_val)')
+    parser.add_argument('--clean', action='store_true',
+                        help='若目标输出目录存在，清空 train/val 子目录后再复制')
+    parser.add_argument('--force', action='store_true',
+                        help='在 --clean 模式下跳过交互确认并强制清理')
     parser.add_argument('--seed', type=int, default=53, help='随机种子')
     args = parser.parse_args()
 
     # 初始化随机种子
     random.seed(args.seed)
+
+    # 将 root_dir 转为绝对路径，方便后续操作
+    args.root_dir = os.path.abspath(args.root_dir)
+    # 计算输出目录：当用户未指定 --output_dir 时使用 root_dir/out_subdir
+    if args.output_dir is None:
+        args.output_dir = os.path.join(args.root_dir, args.out_subdir)
+    args.output_dir = os.path.abspath(args.output_dir)
 
     try:
         # 校验目录结构
@@ -113,6 +149,23 @@ def main():
         train_files, val_files = split_files(matched_files, args.train_ratio)
         print(f"找到 {len(matched_files)} 对有效文件")
         print(f"训练集: {len(train_files)} 验证集: {len(val_files)}")
+
+        # 如果用户要求清理输出目录（仅在输出目录存在时）
+        if args.clean and os.path.exists(args.output_dir):
+            if not args.force:
+                try:
+                    ans = input(f"目标目录 {args.output_dir} 已存在。是否清空 train/val 子目录并继续？ [y/N]: ").strip().lower()
+                except Exception:
+                    ans = 'n'
+                if ans != 'y':
+                    print('取消操作 — 输出目录未清理。若要强制清理请使用 --force。')
+                    return
+            # 删除 train/val 子目录（只删除这两个子目录，避免误删用户其他内容）
+            for sub in ['train', 'val']:
+                subdir = os.path.join(args.output_dir, sub)
+                if os.path.exists(subdir):
+                    print(f"删除: {subdir}")
+                    shutil.rmtree(subdir)
 
         # 创建目录结构
         create_dirs(args.output_dir)
